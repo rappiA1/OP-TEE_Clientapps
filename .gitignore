@@ -1,0 +1,16 @@
+# Unignore all with extensions
+!*.*
+
+# Ignore object some extension files
+*.cmd
+*.d
+*.dmp
+*.elf
+*.lds
+*.map
+*.o
+*.swp
+*.swo
+*.ta
+/i2cTest/EEPROMTester
+/uartTester/uartTestClient
