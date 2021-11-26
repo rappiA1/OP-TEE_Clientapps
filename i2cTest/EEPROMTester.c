@@ -169,7 +169,7 @@ int main(int argc, char *argv[])
 
 	unsigned int bytes_to_read;
 	/* for now only one byte, later array, possibly greater size than data read.*/
-	char readBuffer;
+	char readBuffer[60];
 	TEEC_Result res;
 
 	/* TODO check argc size */
@@ -194,16 +194,21 @@ int main(int argc, char *argv[])
 		if (argv[1][1] == 'r'){
 			
 			/* only one byte read, sequential read not implemented yet. */
-			bytes_to_read = 1;
+			bytes_to_read = atoi(argv[3]);
 
 			/* initialize the i2c controller */
 			res = initController(&ctx);
 
 			/*read byte from the EEPROM */
-			res = readByte(&ctx, writeBuffer, writeBufferLength, &readBuffer, bytes_to_read);
+			res = readByte(&ctx, writeBuffer, writeBufferLength, readBuffer, bytes_to_read);
 
-			printf("Read 0x%x from EEPROM at address 0x%x%x\n", readBuffer,
+			printf("%d bytes read Starting from %x%x:\n", bytes_to_read,
 					writeBuffer[0], writeBuffer[1]);
+			for (int i = 0; i < bytes_to_read; i++){
+				printf("%x ", readBuffer[i]);
+			}
+			printf("\n");
+
 		} else if (argv[1][1] == 'w'){
 			
 			//TODO size check on input string if it exceeds writebuffer size
