@@ -5,6 +5,7 @@
  */
 
 #include <err.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <tee_client_api.h>
@@ -46,9 +47,9 @@ TEEC_Result writeByte(struct test_ctx *ctx,
 	op.params[0].tmpref.buffer = data;
 	op.params[0].tmpref.size = data_length;
 
-	char *bufferPointer = op.params[0].tmpref.buffer;
+//	char *bufferPointer = op.params[0].tmpref.buffer;
 
-	printf("value of writeBuffer: %x%x%x", *bufferPointer, *(bufferPointer + 1 ), *(bufferPointer + 2));
+//	printf("value of writeBuffer: %x%x%x\n", *bufferPointer, *(bufferPointer + 1 ), *(bufferPointer + 2));
 
 	/* slave address */
 	op.params[1].value.a = 80;
@@ -134,53 +135,97 @@ TEEC_Result initController(struct test_ctx *ctx)
 	return res;
 }
 
+void print_usage(void)
+{
+	const char *writer_usage = 
+		"Usage:\n\n"
+		"EEPROMTester -r 0x[addr(16-Bit)] [count Bytes]\n"
+		"EEPROMTester -w 0x[addr(16-Bit)] [string_without_whitespaces]\n";
+
+		fprintf(stderr, "%s\n", writer_usage);
+		exit(1);
+}
+
+
+void readAddressIntoBuffer(char *buffer, char *addressString)
+{
+	for (int n = 0; n < 4; n++){
+			sscanf(addressString, "%2hhx", &buffer[n]);
+			addressString += 2;
+		}
+
+}
+
 /*
  * Main function for testing the read and write functionality of the EEPROM testing application.
  */
 int main(int argc, char *argv[])
 {
 	struct test_ctx ctx;
-	/* Contains two address bytes and one data byte. */
-	char testData[] = {0x00, 0x00, 0x65};
 
-	/* 16-bit address default address*/
-	char address[] = {0x00, 0x00};
-	char* stringPointer = argv[1];
+	/* buffer that contains the parameters and the address */
+	char writeBuffer[60];
+	unsigned int writeBufferLength;
 
+	unsigned int bytes_to_read;
 	/* for now only one byte, later array, possibly greater size than data read.*/
 	char readBuffer;
 	TEEC_Result res;
 
+	/* TODO check argc size */
+	if (argc >= 3){
 
-	/*
-	 * get address to read from from command line parameters 
-	 * and write it to the address array
-	 */
-	if (argc == 2){
-		for(int n = 0; n < 4; n++){
-			sscanf(stringPointer, "%2hhx", &address[n]);
-			printf("address[%d]=%x", n, address[n]);
-			stringPointer += 2;
+		/* 
+		 * read the EEPROM address from the 3rd command line parameter and write it into the
+		 * first two bytes of the writeBuffer, we ignore the first two characters because
+		 * they only represent "0x" 
+		 */
+		readAddressIntoBuffer(writeBuffer, &argv[2][2]);
+
+		/* 
+		 * Minimum 2 address bytes get written to the EEPROM, i.e. at reading
+		 */
+		writeBufferLength = 2;
+
+		startSession(&ctx);
+
+		//TODO implement sequential read
+		/* if read flag is set */
+		if (argv[1][1] == 'r'){
+			
+			/* only one byte read, sequential read not implemented yet. */
+			bytes_to_read = 1;
+
+			/* initialize the i2c controller */
+			res = initController(&ctx);
+
+			/*read byte from the EEPROM */
+			res = readByte(&ctx, writeBuffer, writeBufferLength, &readBuffer, bytes_to_read);
+
+			printf("Read 0x%x from EEPROM at address 0x%x%x\n", readBuffer,
+					writeBuffer[0], writeBuffer[1]);
+		} else if (argv[1][1] == 'w'){
+			
+			//TODO size check on input string if it exceeds writebuffer size
+			/* write data after address into the writeBuffer */
+			strcpy(&writeBuffer[2], argv[3]);
+
+			/* data length additional to the two address bytes */
+			writeBufferLength += strlen(argv[3]);
+			printf("WritebufferLength: %d\n", writeBufferLength);
+
+			/* initialize the i2c controller */
+			res = initController(&ctx);
+
+			/* write to the EEPROM */
+			res = writeByte(&ctx, writeBuffer, writeBufferLength);
+		} else {
+			print_usage();
 		}
+
+	} else {
+		print_usage();
 	}
-
-	startSession(&ctx);
-
-	printf("Initializing i2c controller\n");
-	/* initialize the i2c controller */
-	res = initController(&ctx);
-
-	printf("Writing 0x%x to the EEPROM at address 0x%x%x\n", testData[2],
-			testData[0], testData[1]);
-	/* for testing purposes we  set the size to 3, 2 bytes address and one byte data
-	 * as we only do a byte read for now.
-	 */ 
-	res = writeByte(&ctx, testData, 3);
-
-	res = readByte(&ctx, address, 2, &readBuffer, 1);
-
-	printf("read 0x%x from EEPROM address 0x%x%x\n", readBuffer, address[0],
-			address[1]);
 
 	return res;
 }
