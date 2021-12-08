@@ -47,10 +47,6 @@ TEEC_Result writeByte(struct test_ctx *ctx,
 	op.params[0].tmpref.buffer = data;
 	op.params[0].tmpref.size = data_length;
 
-//	char *bufferPointer = op.params[0].tmpref.buffer;
-
-//	printf("value of writeBuffer: %x%x%x\n", *bufferPointer, *(bufferPointer + 1 ), *(bufferPointer + 2));
-
 	/* slave address */
 	op.params[1].value.a = 80;
 
@@ -81,7 +77,6 @@ TEEC_Result readByte(struct test_ctx *ctx,
 					 TEEC_MEMREF_TEMP_OUTPUT,
 					 TEEC_VALUE_INPUT,
 					 TEEC_NONE);
-	printf("readbyte sets 0x%x%x to buffer\n", address[0], address[1]);
 	op.params[0].tmpref.buffer = address;
 	op.params[0].tmpref.size = address_length;
 
@@ -172,7 +167,9 @@ int main(int argc, char *argv[])
 	char readBuffer[60];
 	TEEC_Result res;
 
-	/* TODO check argc size */
+	//TODO check if command line paramers have correct format.
+
+	/* check argc size */
 	if (argc >= 3){
 
 		/* 
@@ -189,7 +186,6 @@ int main(int argc, char *argv[])
 
 		startSession(&ctx);
 
-		//TODO implement sequential read
 		/* if read flag is set */
 		if (argv[1][1] == 'r'){
 			
@@ -211,19 +207,24 @@ int main(int argc, char *argv[])
 
 		} else if (argv[1][1] == 'w'){
 			
-			//TODO size check on input string if it exceeds writebuffer size
-			/* write data after address into the writeBuffer */
-			strcpy(&writeBuffer[2], argv[3]);
-
 			/* data length additional to the two address bytes */
 			writeBufferLength += strlen(argv[3]);
-			printf("WritebufferLength: %d\n", writeBufferLength);
+
+			if (writeBufferLength > sizeof(writeBuffer)) {
+				fprintf(stderr, "String size exceeds buffer size");
+				exit(1);
+			}
+
+			/* write data after address into the writeBuffer */
+			strcpy(&writeBuffer[2], argv[3]);
 
 			/* initialize the i2c controller */
 			res = initController(&ctx);
 
 			/* write to the EEPROM */
 			res = writeByte(&ctx, writeBuffer, writeBufferLength);
+
+			printf("%d Bytes written to EEPROM\n", writeBufferLength);
 		} else {
 			print_usage();
 		}
