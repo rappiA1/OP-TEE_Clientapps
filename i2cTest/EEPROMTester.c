@@ -163,7 +163,6 @@ int main(int argc, char *argv[])
 	unsigned int writeBufferLength;
 
 	unsigned int bytes_to_read;
-	/* for now only one byte, later array, possibly greater size than data read.*/
 	char readBuffer[60];
 	TEEC_Result res;
 
@@ -189,7 +188,6 @@ int main(int argc, char *argv[])
 		/* if read flag is set */
 		if (argv[1][1] == 'r'){
 			
-			/* only one byte read, sequential read not implemented yet. */
 			bytes_to_read = atoi(argv[3]);
 
 			/* initialize the i2c controller */
@@ -228,6 +226,9 @@ int main(int argc, char *argv[])
 		} else {
 			print_usage();
 		}
+		TEEC_CloseSession(&(ctx.sess));
+
+		TEEC_FinalizeContext(&(ctx.ctx));
 
 	} else {
 		print_usage();
