@@ -28,11 +28,11 @@ struct test_ctx {
  * Write one byte of data to the EEPROM
  *
  * ctx		contains the session data
- * data		String to be written into the EEPROM, including the destination address.
+ * data		buffer to be written into the EEPROM
  * data_length	Length of the data bufffer.
  */
 TEEC_Result writeByte(struct test_ctx *ctx, 
-		char *data, uint32_t data_length)
+		char *data, uint32_t data_length, uint32_t eepromAddress)
 {
 	TEEC_Operation op;
 	uint32_t origin;
@@ -43,12 +43,16 @@ TEEC_Result writeByte(struct test_ctx *ctx,
 
 	op.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_TEMP_INPUT,
 					 TEEC_VALUE_INPUT,
-					 TEEC_NONE, TEEC_NONE);
+					 TEEC_NONE,
+					 TEEC_NONE);
 	op.params[0].tmpref.buffer = data;
 	op.params[0].tmpref.size = data_length;
 
 	/* slave address */
 	op.params[1].value.a = 80;
+
+	/* address on the eeprom. */
+	op.params[1].value.b = eepromAddress;
 
 
 	res = TEEC_InvokeCommand(&ctx->sess,
@@ -61,11 +65,13 @@ TEEC_Result writeByte(struct test_ctx *ctx,
 }
 
 /*
- * read one byte of data from the EEPROM
+ * read data from the EEPROM
+ *
+ * data_length		Number of bytes to read from the EEPROM
+ * eepromAddress	Address on the EEPROM to read from
  */
 TEEC_Result readByte(struct test_ctx *ctx,
-		char *address, uint32_t address_length,
-		char *data, uint32_t data_length)
+		char *data, uint32_t data_length, uint32_t eepromAddress)
 {
 	TEEC_Operation op;
 	uint32_t origin;
@@ -73,18 +79,19 @@ TEEC_Result readByte(struct test_ctx *ctx,
 
 	memset(&op, 0, sizeof(op));
 
-	op.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_TEMP_INPUT,
-					 TEEC_MEMREF_TEMP_OUTPUT,
+	op.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_TEMP_OUTPUT,
 					 TEEC_VALUE_INPUT,
+					 TEEC_NONE,
 					 TEEC_NONE);
-	op.params[0].tmpref.buffer = address;
-	op.params[0].tmpref.size = address_length;
 
-	op.params[1].tmpref.buffer = data;
-	op.params[1].tmpref.size = data_length;
+	op.params[0].tmpref.buffer = data;
+	op.params[0].tmpref.size = data_length;
 
 	//Hardwired EEPROM i2c device address
-	op.params[2].value.a = 80;
+	op.params[1].value.a = 80;
+
+	/* address on the EEPROM */
+	op.params[1].value.b = eepromAddress;
 
 	res = TEEC_InvokeCommand(&ctx->sess,
 				 PTA_CMD_READ,
@@ -141,16 +148,6 @@ void print_usage(void)
 		exit(1);
 }
 
-
-void readAddressIntoBuffer(char *buffer, char *addressString)
-{
-	for (int n = 0; n < 4; n++){
-			sscanf(addressString, "%2hhx", &buffer[n]);
-			addressString += 2;
-		}
-
-}
-
 /*
  * Main function for testing the read and write functionality of the EEPROM testing application.
  */
@@ -159,11 +156,13 @@ int main(int argc, char *argv[])
 	struct test_ctx ctx;
 
 	/* buffer that contains the parameters and the address */
-	char writeBuffer[60];
+	char writeBuffer[4096];
 	unsigned int writeBufferLength;
 
+	uint32_t eepromAddress;
+
 	unsigned int bytes_to_read;
-	char readBuffer[60];
+	char readBuffer[4096];
 	TEEC_Result res;
 
 	//TODO check if command line paramers have correct format.
@@ -173,15 +172,10 @@ int main(int argc, char *argv[])
 
 		/* 
 		 * read the EEPROM address from the 3rd command line parameter and write it into the
-		 * first two bytes of the writeBuffer, we ignore the first two characters because
+		 * integer which contains the address on the EEPROM, we ignore the first two characters because
 		 * they only represent "0x" 
 		 */
-		readAddressIntoBuffer(writeBuffer, &argv[2][2]);
-
-		/* 
-		 * Minimum 2 address bytes get written to the EEPROM, i.e. at reading
-		 */
-		writeBufferLength = 2;
+		eepromAddress = (uint32_t)strtol(&argv[2][2], NULL, 16);
 
 		startSession(&ctx);
 
@@ -194,7 +188,7 @@ int main(int argc, char *argv[])
 			res = initController(&ctx);
 
 			/*read byte from the EEPROM */
-			res = readByte(&ctx, writeBuffer, writeBufferLength, readBuffer, bytes_to_read);
+			res = readByte(&ctx,readBuffer, bytes_to_read, eepromAddress);
 
 			printf("%d bytes read Starting from %x%x:\n", bytes_to_read,
 					writeBuffer[0], writeBuffer[1]);
@@ -205,22 +199,22 @@ int main(int argc, char *argv[])
 
 		} else if (argv[1][1] == 'w'){
 			
-			/* data length additional to the two address bytes */
-			writeBufferLength += strlen(argv[3]);
+			/* data buffer length*/
+			writeBufferLength = strlen(argv[3]);
 
 			if (writeBufferLength > sizeof(writeBuffer)) {
 				fprintf(stderr, "String size exceeds buffer size");
 				exit(1);
 			}
 
-			/* write data after address into the writeBuffer */
-			strcpy(&writeBuffer[2], argv[3]);
+			/* write data after address into writeBuffer */
+			strcpy(writeBuffer, argv[3]);
 
 			/* initialize the i2c controller */
 			res = initController(&ctx);
 
 			/* write to the EEPROM */
-			res = writeByte(&ctx, writeBuffer, writeBufferLength);
+			res = writeByte(&ctx, writeBuffer, writeBufferLength, eepromAddress);
 
 			printf("%d Bytes written to EEPROM\n", writeBufferLength);
 		} else {
