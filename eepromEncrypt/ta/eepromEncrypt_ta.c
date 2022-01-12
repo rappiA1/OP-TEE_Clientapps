@@ -38,7 +38,6 @@
 
 /* Test buffer size*/
 #define AES_TEST_BUFFER_SIZE		4096
-#define AES_IO_BUFFER_SIZE		(AES_TEST_BUFFER_SIZE + 2)
 
 #define PTA_CMD_READ 	0
 #define PTA_CMD_WRITE	1
@@ -360,7 +359,7 @@ static TEE_Result reset_aes_iv(void *session, uint32_t param_types,
  * Writes cipher buffer to the EEPROM by calling EEPROMWriter PTA.
  */
 static TEE_Result writeEEPROM(TEE_TASessionHandle pta_sess,
-		char *data, uint32_t data_length)
+		char *data, uint32_t data_length, uint32_t eepromAddress)
 {
 	uint32_t origin;
 	TEE_Result res;
@@ -374,6 +373,8 @@ static TEE_Result writeEEPROM(TEE_TASessionHandle pta_sess,
 
 	/* i2c Slave Address (EEPROM) */
 	params[1].value.a = 80;
+
+	params[1].value.b = eepromAddress;
 
 	/*
 	 * Invoke Write command in EEPROMWriter PTA.
@@ -389,25 +390,24 @@ static TEE_Result writeEEPROM(TEE_TASessionHandle pta_sess,
 	return res;
 }
 
-static TEE_Result readEEPROM(TEE_TASessionHandle pta_sess,
-		char *address, uint32_t address_length,
-		char *data, uint32_t data_length)
+static TEE_Result readEEPROM(TEE_TASessionHandle pta_sess, char *data, uint32_t data_length,
+		uint32_t eepromAddress)
 {	
 	uint32_t origin;
 	TEE_Result res;
 	TEE_Param params[4];
-	uint32_t paramTypes = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT,
-					      TEE_PARAM_TYPE_MEMREF_OUTPUT,
+	uint32_t paramTypes = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_OUTPUT,
 					      TEE_PARAM_TYPE_VALUE_INPUT,
+					      TEE_PARAM_TYPE_NONE,
 					      TEE_PARAM_TYPE_NONE);
-	params[0].memref.buffer = address;
-	params[0].memref.size = address_length;
-
-	params[1].memref.buffer = data;
-	params[1].memref.size = data_length;
+	params[0].memref.buffer = data;
+	params[0].memref.size = data_length;
 
 	/* i2c slave address (EEPROM) */
-	params[2].value.a = 80;
+	params[1].value.a = 80;
+
+	/* address on the EEPROM */
+	params[1].value.b = eepromAddress;
 
 	res = TEE_InvokeTACommand(pta_sess, TEE_TIMEOUT_INFINITE,
 			PTA_CMD_READ, paramTypes, params, &origin);
@@ -438,12 +438,14 @@ static TEE_Result cipher_buffer(void *session, uint32_t param_types,
 	TEE_TASessionHandle pta_sess;
 	TEE_Result res;
 
+	uint32_t eepromAddress;
+
 	char tempReadBuffer[AES_TEST_BUFFER_SIZE];
-	char tempWriteBuffer[AES_IO_BUFFER_SIZE];
+	char tempWriteBuffer[AES_TEST_BUFFER_SIZE];
 	
-	tempWriteBuffer[0] = 0x10;
-	tempWriteBuffer[1] = 0x00;
-	//will be used later.
+	/* EEProm address later parameter from Normal World CA */
+	eepromAddress = 0x0000;
+	
 	//unsigned int bytes_to_read;
 	unsigned int writeBufferLength;
 
@@ -474,9 +476,6 @@ static TEE_Result cipher_buffer(void *session, uint32_t param_types,
 	DMSG("Initializing Session with EEPROMWriter");
 	res = initSessionWithEPW(&pta_sess);
 
-	/* writeBuffer always contains minimum 2 bytes EEPROM Address */ 
-	writeBufferLength = 2;
-
 	DMSG("MODE: %d", sess->mode);
 
 	if (sess->mode == TEE_MODE_ENCRYPT) {
@@ -484,23 +483,22 @@ static TEE_Result cipher_buffer(void *session, uint32_t param_types,
 		/* write ciphered data after address into the writeBuffer */
 		res = TEE_CipherUpdate(sess->op_handle,
 				params[0].memref.buffer, params[0].memref.size,
-				&tempWriteBuffer[2], &params[0].memref.size);
+				tempWriteBuffer, &params[0].memref.size);
 
-		DMSG("write buffer to EEPROM address: 0x%x%x", tempWriteBuffer[0], tempWriteBuffer[1]);
+		DMSG("write buffer to EEPROM address: 0x%x", eepromAddress);
 
 		DMSG("first two bytes of encrypted memory: 0x%x, 0x%x", tempWriteBuffer[2], tempWriteBuffer[3]);
 		/* Increase the writeBufferLength by the size of the buffer provided by the CA */
-		writeBufferLength += params[0].memref.size;
+		writeBufferLength = params[0].memref.size;
 
 		/* Write ciphered Data to the EEPROM */
-		res = writeEEPROM(pta_sess, tempWriteBuffer, writeBufferLength);
+		res = writeEEPROM(pta_sess, tempWriteBuffer, writeBufferLength, eepromAddress);
 
 	}
 	else if (sess->mode == TEE_MODE_DECRYPT) {
 		DMSG("read buffer from EEPROM");
 		/* read tempBuffer from the EEPROM */
-		res = readEEPROM(pta_sess, tempWriteBuffer, writeBufferLength,
-			       	tempReadBuffer, params[1].memref.size); 	
+		res = readEEPROM(pta_sess, tempReadBuffer, params[1].memref.size, eepromAddress); 	
 
        		res = TEE_CipherUpdate(sess->op_handle,
 				tempReadBuffer, sizeof(tempReadBuffer),
