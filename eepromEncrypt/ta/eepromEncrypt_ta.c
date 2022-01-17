@@ -445,6 +445,8 @@ static TEE_Result cipher_buffer(void *session, uint32_t param_types,
 	
 	/* EEProm address as parameter from Normal World CA */
 	eepromAddress = params[2].value.a;
+
+	DMSG("EEPROMADDRESS: %x", eepromAddress);
 	
 	//unsigned int bytes_to_read;
 	unsigned int writeBufferLength;
