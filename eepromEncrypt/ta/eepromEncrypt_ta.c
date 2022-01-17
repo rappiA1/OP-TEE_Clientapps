@@ -430,7 +430,7 @@ static TEE_Result cipher_buffer(void *session, uint32_t param_types,
 	const uint32_t exp_param_types =
 		TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT,
 				TEE_PARAM_TYPE_MEMREF_OUTPUT,
-				TEE_PARAM_TYPE_NONE,
+				TEE_PARAM_TYPE_VALUE_INPUT,
 				TEE_PARAM_TYPE_NONE);
 	struct aes_cipher *sess;
 
@@ -443,8 +443,8 @@ static TEE_Result cipher_buffer(void *session, uint32_t param_types,
 	char tempReadBuffer[AES_TEST_BUFFER_SIZE];
 	char tempWriteBuffer[AES_TEST_BUFFER_SIZE];
 	
-	/* EEProm address later parameter from Normal World CA */
-	eepromAddress = 0x0000;
+	/* EEProm address as parameter from Normal World CA */
+	eepromAddress = params[2].value.a;
 	
 	//unsigned int bytes_to_read;
 	unsigned int writeBufferLength;

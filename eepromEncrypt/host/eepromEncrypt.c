@@ -145,11 +145,14 @@ void cipher_buffer(struct test_ctx *ctx, char *in, char *out, size_t sz)
 	memset(&op, 0, sizeof(op));
 	op.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_TEMP_INPUT,
 					 TEEC_MEMREF_TEMP_OUTPUT,
-					 TEEC_NONE, TEEC_NONE);
+					 TEEC_VALUE_INPUT, 
+					 TEEC_NONE);
 	op.params[0].tmpref.buffer = in;
 	op.params[0].tmpref.size = sz;
 	op.params[1].tmpref.buffer = out;
 	op.params[1].tmpref.size = sz;
+
+	op.params[2].value.a = 0x0000;
 
 	res = TEEC_InvokeCommand(&ctx->sess, TA_AES_CMD_CIPHER,
 				 &op, &origin);
