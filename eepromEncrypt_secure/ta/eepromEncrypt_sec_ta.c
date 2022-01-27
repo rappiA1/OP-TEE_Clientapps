@@ -23,6 +23,10 @@
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
+ *
+ *
+ * TA for encrypting data and writing them to the EEPROM, works only with 128
+ * Bit AES keys.
  */
 #include <inttypes.h>
 
@@ -103,6 +107,11 @@ static TEE_Result ta2tee_algo_id(uint32_t param, uint32_t *algo)
 		return TEE_ERROR_BAD_PARAMETERS;
 	}
 }
+
+/*
+ * Convert the TA macro types to the macro types defined
+ * by the GlobalPlatform specification.
+ */
 static TEE_Result ta2tee_key_size(uint32_t param, uint32_t *key_size)
 {
 	switch (param) {
@@ -115,6 +124,11 @@ static TEE_Result ta2tee_key_size(uint32_t param, uint32_t *key_size)
 		return TEE_ERROR_BAD_PARAMETERS;
 	}
 }
+
+/*
+ * Convert the TA macro types to the macro types defined
+ * by the GobalPlatform Specification.
+ */
 static TEE_Result ta2tee_mode_id(uint32_t param, uint32_t *mode)
 {
 	switch (param) {
@@ -130,20 +144,9 @@ static TEE_Result ta2tee_mode_id(uint32_t param, uint32_t *mode)
 	}
 }
 
-
-
-/*
- * Process command TA_AES_CMD_PREPARE. API in aes_ta.h
- *
- * Allocate resources required for the ciphering operation.
- * During ciphering operation, when expect client can:
- * - update the key materials (provided by client)
- * - reset the initial vector (provided by client)
- * - cipher an input buffer into an output buffer (provided by client)
+/* 
+ * Write the key from the normal world to the secure Storage.
  */
-
-
-/* Write the key from the normal world to the secure Storage */
 static TEE_Result create_raw_object(uint32_t param_types, TEE_Param params[4])
 {
 	const uint32_t exp_param_types = 
@@ -201,7 +204,12 @@ static TEE_Result create_raw_object(uint32_t param_types, TEE_Param params[4])
 
 }
 
-/* read the object from secure Storage */
+/* 
+ * reads the AES key content from the secure storage to a buffer.
+ *
+ * buffer		buffer that will store the key contents.
+ * buffer_size		size of the key buffer.
+ */
 static TEE_Result load_secure_storage_key(char *buffer, uint32_t *buffer_size)
 {
 	TEE_ObjectHandle object;
@@ -261,28 +269,22 @@ static TEE_Result load_secure_storage_key(char *buffer, uint32_t *buffer_size)
 		goto exit;
 	}
 
-	/* Return the number of byte effectively filled */
+	/* Return the number of bytes effectively filled */
 	*buffer_size = read_bytes;
 exit:
 	TEE_CloseObject(object);
-//	TEE_Free(obj_id);
 	TEE_Free(data);
 	return res;
 }
 
 /*
- * sets the key obtained from the secure Key in the session struct.
- * TODO change later so that key is not visible from normal world since session struct is
- * readable from normal world.
+ * set the key in the aes_cipher struct.
+ *
+ * session		session unique pointer which points to a pointer
+ * 			that points to the memory with the aes_cipher struct.
  */
-static TEE_Result set_aes_key(void *session/*, uint32_t param_types,
-				TEE_Param params[4] */)
+static TEE_Result set_aes_key(void *session)
 {
-/*	const uint32_t exp_param_types =
-		TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT,
-				TEE_PARAM_TYPE_NONE,
-				TEE_PARAM_TYPE_NONE,
-				TEE_PARAM_TYPE_NONE);*/
 	struct aes_cipher *sess;
 	TEE_Attribute attr;
 	TEE_Result res;
@@ -292,11 +294,6 @@ static TEE_Result set_aes_key(void *session/*, uint32_t param_types,
 	/* Get ciphering context from session ID */
 	DMSG("Session %p: load key material", session);
 	sess = (struct aes_cipher *)session;
-
-	/* Safely get the invocation parameters */
-	/*if (param_types != exp_param_types)
-		return TEE_ERROR_BAD_PARAMETERS;
-	*/
 
 	key_sz = AES128_KEY_BYTE_SIZE;
 
@@ -381,6 +378,11 @@ static TEE_Result reset_aes_iv(void *session, uint32_t param_types,
 
 /*
  * Writes cipher buffer to the EEPROM by calling EEPROMWriter PTA.
+ *
+ * pta_sess		Handle to the session with the eepromWriter PTA (EEPROM Driver)
+ * data			Encrypted memory buffer
+ * data_length		Size of the encrypted Memory buffer
+ * eepromAddress	Destination address on the EEPROM
  */
 static TEE_Result writeEEPROM(TEE_TASessionHandle pta_sess,
 		char *data, uint32_t data_length, uint32_t eepromAddress)
@@ -414,6 +416,14 @@ static TEE_Result writeEEPROM(TEE_TASessionHandle pta_sess,
 	return res;
 }
 
+/*
+ * Read ciphered Data from the EEPROM.
+ *
+ * pta_sess		Handle to the session with the eepromWriter PTA (EEPROM Driver)
+ * data			Encrypted memory buffer
+ * data_length		Size of the encrypted Memory buffer
+ * eepromAddress	Destination address on the EEPROM
+ */
 static TEE_Result readEEPROM(TEE_TASessionHandle pta_sess, char *data, uint32_t data_length,
 		uint32_t eepromAddress)
 {	
@@ -443,14 +453,12 @@ static TEE_Result readEEPROM(TEE_TASessionHandle pta_sess, char *data, uint32_t 
 
 /*
  * Process command TA_AES_CMD_CIPHER. Encrypt and decrypt buffer.
+ * 
+ * session		pointer to the memory of the aes_cipher struct.
  */
 static TEE_Result cipher_buffer(void *session, uint32_t param_types,
 				TEE_Param params[4])
 {
-	/*
-	 * For now we use the hardcoded address 0x0, later we have to add a field for the address
-	 * in paramaeter types.
-	 */
 	const uint32_t exp_param_types =
 		TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT,
 				TEE_PARAM_TYPE_MEMREF_OUTPUT,
@@ -467,15 +475,13 @@ static TEE_Result cipher_buffer(void *session, uint32_t param_types,
 	char tempReadBuffer[AES_TEST_BUFFER_SIZE];
 	char tempWriteBuffer[AES_TEST_BUFFER_SIZE];
 	
-	/* EEProm address as parameter from Normal World CA */
+	/* Address on EEPROM as parameter from Normal World CA */
 	eepromAddress = params[2].value.a;
 
-	DMSG("EEPROMADDRESS: %x", eepromAddress);
+	//DMSG("EEPROMADDRESS: %x", eepromAddress);
 	
-	//unsigned int bytes_to_read;
+	/* number of bytes to write */
 	unsigned int writeBufferLength;
-
-	EMSG("After assigning writeBuffer values");
 
 	/* Get ciphering context from session ID */
 	DMSG("Session %p: cipher buffer", session);
@@ -496,7 +502,7 @@ static TEE_Result cipher_buffer(void *session, uint32_t param_types,
 		return TEE_ERROR_BAD_STATE;
 
 	/* 
-	 * Create Session with EEPROMWriter PTA and call
+	 * Create Session with EEPROMWriter PTA (EEPROM Driver) and call
 	 * init function
 	 */
 	DMSG("Initializing Session with EEPROMWriter");
@@ -534,11 +540,9 @@ static TEE_Result cipher_buffer(void *session, uint32_t param_types,
 		return TEE_ERROR_BAD_PARAMETERS;
 	}
 
-	DMSG("Closing EPW TA_session");
 	/* close the session to the EEPROMWriter PTA */
+	DMSG("Closing EPW TA_session");
 	TEE_CloseTASession(pta_sess);
-
-	DMSG("EPW TA_session closed");
 
 	return res;
 }
@@ -554,6 +558,10 @@ void TA_DestroyEntryPoint(void)
 	/* Nothing to do */
 }
 
+/*
+ * called when a session to the TA is created. Allocates
+ * memory for the aes_cipher struct, that will contain encryption info.
+ */
 TEE_Result TA_OpenSessionEntryPoint(uint32_t __unused param_types,
 					TEE_Param __unused params[4],
 					void __unused **session)
@@ -563,7 +571,8 @@ TEE_Result TA_OpenSessionEntryPoint(uint32_t __unused param_types,
 	/*
 	 * Allocate and init ciphering materials for the session.
 	 * The address of the structure is used as session ID for
-	 * the client.
+	 * the client. (set as session_id in the normal world session struct,
+	 * see tee_client_api.h)
 	 */
 	sess = TEE_Malloc(sizeof(*sess), 0);
 	if (!sess)
@@ -596,6 +605,9 @@ void TA_CloseSessionEntryPoint(void *session)
 	TEE_Free(sess);
 }
 
+/*
+ * prepares ciphering operation
+ */
 static TEE_Result alloc_resources(void *session, uint32_t param_types,
 				  TEE_Param params[4])
 {
@@ -710,6 +722,10 @@ err:
 	return res;
 }
 
+/* 
+ * called upon command invocation, calls the correct function for the
+ * desired command.
+ */
 TEE_Result TA_InvokeCommandEntryPoint(void *session,
 					uint32_t cmd,
 					uint32_t param_types,
@@ -719,8 +735,6 @@ TEE_Result TA_InvokeCommandEntryPoint(void *session,
 	case TA_AES_CMD_PREPARE:
 		DMSG("call prepare function");
 		return alloc_resources(session, param_types, params);
-//	case TA_AES_CMD_SET_KEY:
-//		return set_aes_key(session, param_types, params);
 	case TA_AES_CMD_SET_IV:
 		DMSG("calling iv function");
 		return reset_aes_iv(session, param_types, params);
@@ -729,8 +743,6 @@ TEE_Result TA_InvokeCommandEntryPoint(void *session,
 		return cipher_buffer(session, param_types, params);
 	case TA_AES_CMD_WRITE_RAW:
 		return create_raw_object(param_types, params);
-//	case TA_AES_CMD_READ_RAW:
-//		return read_raw_object(param_types, params);
 	default:
 		EMSG("Command ID 0x%x is not supported", cmd);
 		return TEE_ERROR_NOT_SUPPORTED;

@@ -23,6 +23,8 @@
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
+ *
+ * Client application for writing data securely to the EEPROM via OP-TEE OS.
  */
 
 #include <err.h>
@@ -37,7 +39,7 @@
 #include <eepromEncrypt_sec_ta.h>
 
 #define AES_TEST_BUFFER_SIZE	4096
-#define AES_128_KEY_SIZE	16
+#define AES_128_KEY_BYTE_SIZE	16
 #define AES_BLOCK_SIZE		16
 
 #define DECODE			0
@@ -53,7 +55,7 @@ struct test_ctx {
 void print_usage(void)
 {
         const char *writer_usage =
-                "Usage:\n argv OFFSETS aendern\n"
+                "Usage:\n"
                 "eepromEncrypt_sec -r 0x[addr(16-Bit)] [count Bytes]\n"
                 "eepromEncrypt_sec -w 0x[addr(16-Bit)] [\"input_string\"]\n"
 		"eepromEncrypt_sec --set_key [keyfile(128-Bit Key)]\n";
@@ -81,12 +83,19 @@ void prepare_tee_session(struct test_ctx *ctx)
 			res, origin);
 }
 
+/*
+ * close the session and the context
+ */
 void terminate_tee_session(struct test_ctx *ctx)
 {
 	TEEC_CloseSession(&ctx->sess);
 	TEEC_FinalizeContext(&ctx->ctx);
 }
 
+/*
+ * Prepares the Ciphering operation by setting the AES encryption
+ * mode, the key size and if there should be decoded or encoded.
+ */
 void prepare_aes(struct test_ctx *ctx, int encode)
 {
 	TEEC_Operation op;
@@ -111,29 +120,10 @@ void prepare_aes(struct test_ctx *ctx, int encode)
 			res, origin);
 }
 
-/*
-void set_key(struct test_ctx *ctx, char *key, size_t key_sz)
-{
-	TEEC_Operation op;
-	uint32_t origin;
-	TEEC_Result res;
-
-	memset(&op, 0, sizeof(op));
-	op.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_TEMP_INPUT,
-					 TEEC_NONE, TEEC_NONE, TEEC_NONE);
-
-	op.params[0].tmpref.buffer = key;
-	op.params[0].tmpref.size = key_sz;
-
-	res = TEEC_InvokeCommand(&ctx->sess, TA_AES_CMD_SET_KEY,
-				 &op, &origin);
-	if (res != TEEC_SUCCESS)
-		errx(1, "TEEC_InvokeCommand(SET_KEY) failed 0x%x origin 0x%x",
-			res, origin);
-}
-
-*/
-
+/* 
+ * sets the invocation vector required for the AES counter
+ * mode (CTR). 
+ */
 void set_iv(struct test_ctx *ctx, char *iv, size_t iv_sz)
 {
 	TEEC_Operation op;
@@ -153,6 +143,13 @@ void set_iv(struct test_ctx *ctx, char *iv, size_t iv_sz)
 			res, origin);
 }
 
+/*
+ * Performs the actual ciphering (encode/decode) operation on memory read/written to the
+ * EEPROM
+ *
+ * eepromaddress		the address to be written into on the eeprom
+ * sz				size of the buffer to be written into / read from
+ */
 void cipher_buffer(struct test_ctx *ctx, char *in, char *out, size_t sz, uint32_t eepromAddress)
 {
 	TEEC_Operation op;
@@ -178,7 +175,12 @@ void cipher_buffer(struct test_ctx *ctx, char *in, char *out, size_t sz, uint32_
 			res, origin);
 }
 
-/* writes a 128-Bit AES key file to the OP-TEE secure Storage */
+/* 
+ * writes a 128-Bit AES key file to the OP-TEE secure Storage 
+ *
+ * data			pointer to a buffer that contains the key
+ * data_len		size of the key buffer 
+ */
 TEEC_Result write_secure_object(struct test_ctx *ctx, char *data, size_t data_len)
 {	
 	TEEC_Operation op;
@@ -201,50 +203,15 @@ TEEC_Result write_secure_object(struct test_ctx *ctx, char *data, size_t data_le
 	return res;	
 }
 
-/* only for testing purposes, delete later */
-TEEC_Result read_secure_object(struct test_ctx *ctx, 
-                        char *data, size_t data_len)
-{
-        TEEC_Operation op;
-        uint32_t origin;
-        TEEC_Result res;
-        //size_t id_len = strlen(id);
-
-        memset(&op, 0, sizeof(op));
-        op.paramTypes = TEEC_PARAM_TYPES(TEEC_MEMREF_TEMP_INPUT,
-                                         TEEC_MEMREF_TEMP_OUTPUT,
-                                         TEEC_NONE, TEEC_NONE);
-
-        op.params[0].tmpref.buffer = "TA_AES_Key";
-        op.params[0].tmpref.size = 11;
-
-        op.params[1].tmpref.buffer = data;
-        op.params[1].tmpref.size = data_len;
-
-        res = TEEC_InvokeCommand(&ctx->sess,
-                                 TA_AES_CMD_READ_RAW,
-                                 &op, &origin);
-        switch (res) {
-        case TEEC_SUCCESS:
-        case TEEC_ERROR_SHORT_BUFFER:
-        case TEEC_ERROR_ITEM_NOT_FOUND:
-                break;
-        default:
-                printf("Command READ_RAW failed: 0x%x / %u\n", res, origin);
-        }
-
-        return res;
-}
-
-
 int main(int argc, char *argv[])
 {
 	struct test_ctx ctx;
-	char key[AES_128_KEY_SIZE];
+	char key[AES_128_KEY_BYTE_SIZE];
 	char iv[AES_BLOCK_SIZE];
 	char clear[AES_TEST_BUFFER_SIZE];
 	char ciph[AES_TEST_BUFFER_SIZE];
 	char temp[AES_TEST_BUFFER_SIZE];
+	uint32_t file_size;
 	
 	uint32_t eepromAddress;
 
@@ -289,7 +256,7 @@ int main(int argc, char *argv[])
 		/* print out count bytes of decrypted memory */
 		printf("Decrypted %d Bytes from the EEPROM:\n", read_count);
 		for(int i = 0; i < read_count; i++){
-			printf("%c ", temp[i]);
+			printf("%c", temp[i]);
 		}
 		
 		printf("\n");
@@ -299,12 +266,19 @@ int main(int argc, char *argv[])
 		
 		prepare_tee_session(&ctx);
 		
-		/* load AES key from file into key array */
+		/* load AES key from a specified file into key array */
 		fp = fopen(argv[2], "r");
 
+		fseek(fp, 0, SEEK_END); // seek to end of file
+		file_size = ftell(fp); // get current file pointer
+		fseek(fp, 0, SEEK_SET); // seek back to beginning of file
 
-		/* TODO check for parameter key size */
-		fread(key, AES_128_KEY_SIZE, 1, fp);
+		/* check key size */
+		if (file_size != 17) {
+			errx(1, "Incorrect key size: %d, expected 16", file_size);
+		}
+
+		fread(key, AES_128_KEY_BYTE_SIZE, 1, fp);
 
 		TEEC_Result res;
 		res = write_secure_object(&ctx, key, sizeof(key));
@@ -312,17 +286,6 @@ int main(int argc, char *argv[])
 		if (res != TEEC_SUCCESS)
 			errx(1, "Failed to set key");
 
-		/* for testing read the set key from the secure storage */
-	/*	res = read_secure_object(&ctx, key, sizeof(key));
-
-		if (res != TEEC_SUCCESS)
-			errx(1, "Failed to fetch the key");
-		printf("Secure Object contents: \n");
-		for (int i = 0; i < sizeof(key); i++){
-			printf("%c", key[i]);
-		}
-		printf("\n");
-	*/	
 		terminate_tee_session(&ctx);
  
 	} else {
